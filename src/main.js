@@ -16,6 +16,8 @@ const sfx = new URLSearchParams(location.search).has("rec") ? null : createAudio
 
 // ================================================================ setup
 const REC = new URLSearchParams(location.search).has("rec");
+const DEMO = new URLSearchParams(location.search).has("demo");
+if (DEMO) document.body.classList.add("demo");
 if (REC) document.body.classList.add("rec");
 
 let seed = 20261104;
@@ -572,7 +574,7 @@ function aiPlan(car) {
 	const a = car.ai; const opts = [];
 	for (let k = 0; k < 4; k++) { const [dx, dz] = DIRS[k]; if (dx === -a.dx && dz === -a.dz) continue; const ti = a.ni + dx, tj = a.nj + dz; if (ti < 0 || tj < 0 || ti > N || tj > N) continue; opts.push(k); }
 	let k = opts.find((o) => DIRS[o][0] === a.dx && DIRS[o][1] === a.dz);
-	if (k === undefined || rand() < 0.45) k = pick(opts);
+	if (k === undefined || (!a.straight && rand() < 0.45)) k = pick(opts);
 	const [dx, dz] = DIRS[k]; const [rx, rz] = rightOf(dx, dz);
 	const nx = nodePos(a.ni), nz = nodePos(a.nj);
 	a.i = a.ni; a.j = a.nj; a.ni = a.i + dx; a.nj = a.j + dz; a.dx = dx; a.dz = dz;
@@ -931,10 +933,10 @@ function step(dt) {
 	sun.position.set(player.x + SUN_DIR.x * 250, SUN_DIR.y * 250 + 40, player.z + SUN_DIR.z * 250); sun.target.position.set(player.x, 0, player.z);
 	updateCamera(dt);
 }
-let last = performance.now(), started = false;
+let last = performance.now(), started = false, demoT = 0, starterCar = null;
 function frame(now) {
 	const dt = Math.min(0.05, (now - last) / 1000); last = now;
-	if (started) step(dt); else { clock += dt; introCam(camera, clock); }
+	if (started) { if (DEMO) { demoT += dt; director(demoT, starterCar); } step(dt); } else { clock += dt; introCam(camera, clock); }
 	composer.render(); drawHud();
 	requestAnimationFrame(frame);
 }
@@ -953,37 +955,68 @@ async function boot() {
 	for (let k = 0; k < 34; k++) { const p = makeHuman({ top: pick(TOPS), bottom: pick(BOTTOMS), hat: rand() < 0.35 }); peds.push(p); spawnPed(p); p.x = 0; p.z = 0; p.mixer.update(rr(0, 2)); }
 	// start on the beach boulevard, a parked red car waiting
 	player.x = nodePos(0) + ROAD / 2 + 2.2; player.z = nodePos(4) + 14; player.h = Math.PI;
-	const starter = new Car({ color: 0xb3121f, driver: false }); starter.place(nodePos(0) + ROAD / 2 - 1.4, nodePos(4) + 9, Math.PI);
+	const starter = new Car({ color: 0xb3121f, driver: false }); starter.place(nodePos(0) + ROAD / 2 - 1.4, nodePos(4) + 9, Math.PI); starterCar = starter;
+	if (DEMO || REC) player.z = starter.z + 12;
 	camYaw = Math.PI; camPos.set(player.x, 3, player.z + 6);
 	bar.textContent = "";
 	document.getElementById("play").style.visibility = "visible";
 	if (REC) { window.NB = recApi(starter); return; }
-	const go = () => { if (started) return; started = true; sfx?.start(); document.getElementById("splash").style.display = "none"; canvas.requestPointerLock?.(); };
+	const go = () => { if (started) return; started = true; sfx?.start(); document.getElementById("splash").style.display = "none"; if (!DEMO) canvas.requestPointerLock?.(); };
 	document.getElementById("play").addEventListener("click", go);
 	addEventListener("keydown", (e) => { if (e.code === "Enter") go(); });
 	requestAnimationFrame(frame);
 }
 
-// ================================================================ recording / screenshot director
+// ================================================================ trailer director (?rec for offline render, ?demo for real time)
 function recApi(starter) {
 	started = true; let t = 0;
 	return {
-		tick(dt, draw = true) { t += dt; director(t, starter); step(dt); if (draw) { drawHud(); composer.render(); } },
+		tick(dt, draw = true) { t += dt; director(t, starter, dt); step(dt); if (draw) { drawHud(); composer.render(); } },
 		info() { return { t, wanted, cars: cars.length, x: player.x, z: player.z, inCar: !!player.car }; },
-		set(o) { Object.assign(window, o); },
 	};
 }
+const smooth = (k) => { k = clamp(k, 0, 1); return k * k * (3 - 2 * k); };
+const V = (x, y, z) => new THREE.Vector3(x, y, z);
+let shot = -1;
+function cut(n, fn) { if (shot !== n) { shot = n; camOverride = fn; if (!fn) updateCamera(1); } }
 function director(t, starter) {
-	if (t < 3) { recInput = { up: 0, down: 0, left: 0, right: 0, hand: 0 }; return; }
-	if (t < 5.2) { recInput = { walkTo: [starter.x + 2.6, starter.z] }; return; }
-	if (!player.car) {
+	const c = player.car;
+	if (t < 5.5) { // drone: from over the ocean at sunset down to the hero
+		recInput = { up: 0, down: 0, left: 0, right: 0, hand: 0 };
+		cut(0, (cam) => {
+			const k = smooth(t / 5.5);
+			cam.position.lerpVectors(V(BEACH_X - 150, 85, starter.z + 120), V(player.x + 0.4, 2.3, player.z + 4.6), k);
+			cam.lookAt(V(0, 0, 0).lerpVectors(V(CITY * 0.35, 25, starter.z - 30), V(player.x, 1.5, player.z - 2.5), k));
+			cam.fov = 55; cam.updateProjectionMatrix();
+		});
+		camYaw = Math.PI; return;
+	}
+	if (t < 7.4 && !c) { cut(1, null); recInput = { walkTo: [starter.x + 2.6, starter.z + 0.5] }; return; }
+	if (!c) {
 		if (Math.hypot(player.x - starter.x, player.z - starter.z) > 4.4) { player.x = starter.x + 2.6; player.z = starter.z; }
 		pressE = true; recInput = { auto: true }; updatePlayer(0);
-		const c = player.car, sx = c.x, sz = c.z; aiStart(c, 0, 4, 3); c.place(sx, sz, Math.PI); c.max = 40;
+		const pc = player.car, sx = pc.x, sz = pc.z; aiStart(pc, 0, 4, 3); pc.place(sx, sz, Math.PI); pc.max = 40; pc.ai.straight = true;
+		return;
 	}
 	recInput = { auto: true };
-	if (t > 9 && wanted < 2) addWanted(1);
-	if (t > 13 && wanted < 3) addWanted(1);
+	if (t > 10.5 && wanted < 3) { addWanted(3 - wanted); }
+	const fx = Math.sin(c.h), fz = Math.cos(c.h);
+	if (t < 14) cut(2, null);
+	else if (t < 19) cut(3, (cam, dt) => { // low side tracking
+		const want = V(c.x + fz * 7.5 + fx * 2, 1.5, c.z - fx * 7.5 + fz * 2);
+		cam.position.lerp(want, 1 - Math.exp(-7 * dt)); cam.lookAt(c.x - fx * 3, 1.0, c.z - fz * 3); cam.fov = 52; cam.updateProjectionMatrix();
+	});
+	else if (t < 24) cut(4, (cam, dt) => { // ahead of the car looking back at it and the cops
+		const want = V(c.x + fx * 11, 1.7, c.z + fz * 11);
+		cam.position.lerp(want, 1 - Math.exp(-8 * dt)); cam.lookAt(c.x - fx * 6, 1.3, c.z - fz * 6); cam.fov = 50; cam.updateProjectionMatrix();
+	});
+	else if (t < 29) cut(5, null);
+	else cut(6, (cam, dt) => { // crane up into the sunset
+		const k = smooth((t - 29) / 6);
+		cam.position.lerp(V(c.x - fx * (12 + k * 40), 4 + k * 70, c.z - fz * (12 + k * 40)), 1 - Math.exp(-2.5 * dt));
+		cam.lookAt(c.x + fx * 20, 0, c.z + fz * 20); cam.fov = 58; cam.updateProjectionMatrix();
+	});
+	if (DEMO && t > 31) document.body.classList.add("ended");
 }
 
 boot().catch((e) => { console.error(e); document.getElementById("loading").textContent = "Failed to load: " + e.message; });
