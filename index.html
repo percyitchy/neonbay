@@ -37,6 +37,14 @@
   #mission .mi.done em { display:none; }
   #mission .mi.cur { color:#fff; font-weight:800; font-size:14px; }
   #mission .mi.cur b { color:#ff6fbf; }
+  #controls { position:absolute; right:20px; top:50%; transform:translateY(-50%); width:230px; padding:12px 14px; border-radius:14px; background:rgba(16,6,28,.55); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); box-shadow:0 0 0 1px rgba(255,255,255,.12), 0 10px 30px rgba(0,0,0,.35); font: 500 13px/1.3 system-ui, sans-serif; transition:opacity .2s; }
+  #controls.hide { opacity:0; }
+  #controls h4 { margin:0 0 6px; font: 900 13px/1 "Arial Black", Impact, sans-serif; letter-spacing:2px; color:#33f0ff; }
+  #controls .grp { margin-bottom:10px; opacity:.45; transition:opacity .2s; }
+  #controls .grp.on { opacity:1; }
+  #controls .row { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:2px 0; }
+  #controls kbd { display:inline-block; min-width:22px; padding:2px 6px; border-radius:6px; background:rgba(255,255,255,.16); box-shadow:inset 0 -2px 0 rgba(0,0,0,.35); font: 800 11px/1.4 system-ui, sans-serif; text-align:center; color:#fff; }
+  #controls .foot { font-size:11px; opacity:.6; margin-top:2px; }
   #reward { position:absolute; left:0; right:0; top:calc(22% + 96px); text-align:center; font-size:46px; color:#8dff8a; opacity:0; transition:opacity .25s; text-shadow:0 3px 0 #062, 0 0 20px rgba(0,0,0,.5); }
   #reward.show { opacity:1; }
   #splash { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; gap:16px; background:linear-gradient(180deg, rgba(20,6,30,.15) 0%, rgba(20,6,30,0) 35%, rgba(20,6,30,.85) 100%), url(assets/ui/keyart.jpg) center/cover no-repeat, #1a0b2e; text-align:center; padding:24px 24px 56px; }
@@ -48,7 +56,7 @@
   #splash .keys b { display:inline-block; min-width:26px; padding:1px 7px; border-radius:6px; background:rgba(255,255,255,.15); font-weight:700; }
   #splash .credit { position:absolute; bottom:16px; font: 500 12px system-ui, sans-serif; color:rgba(255,255,255,.55); }
   #loading { font: 600 14px system-ui, sans-serif; color:rgba(255,255,255,.7); }
-  body.rec #splash, body.rec #tip { display:none; }
+  body.rec #splash, body.rec #tip, body.rec #controls { display:none; }
 </style>
 <script type="importmap">
 { "imports": { "three": "./vendor/three/build/three.module.js", "three/addons/": "./vendor/three/examples/jsm/" } }
@@ -62,6 +70,29 @@
   <div id="money">$000000</div>
   <canvas id="mini" width="400" height="400"></canvas>
   <div id="speed">0<small>KM/H</small></div>
+  <div id="controls">
+    <div class="grp" id="ctlFoot"><h4>ON FOOT</h4>
+      <div class="row"><span>Move</span><span><kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd></span></div>
+      <div class="row"><span>Run</span><kbd>Shift</kbd></div>
+      <div class="row"><span>Jump</span><kbd>Space</kbd></div>
+      <div class="row"><span>Steal a car</span><kbd>E</kbd></div>
+      <div class="row"><span>Look around</span><kbd>Mouse</kbd></div>
+    </div>
+    <div class="grp" id="ctlCar"><h4>DRIVING</h4>
+      <div class="row"><span>Gas</span><kbd>W</kbd></div>
+      <div class="row"><span>Brake / reverse</span><kbd>S</kbd></div>
+      <div class="row"><span>Steer</span><span><kbd>A</kbd> <kbd>D</kbd></span></div>
+      <div class="row"><span>Handbrake / drift</span><kbd>Space</kbd></div>
+      <div class="row"><span>Get out</span><kbd>E</kbd></div>
+    </div>
+    <div class="grp on"><h4>GAME</h4>
+      <div class="row"><span>Camera distance</span><kbd>C</kbd></div>
+      <div class="row"><span>Radio on / off</span><kbd>R</kbd></div>
+      <div class="row"><span>Mute</span><kbd>M</kbd></div>
+      <div class="row"><span>Hide this panel</span><kbd>H</kbd></div>
+    </div>
+    <div class="foot">Click the game to lock the mouse, Esc to release.</div>
+  </div>
   <div id="msg"></div>
   <div id="reward"></div>
   <div id="tip"></div>
@@ -71,7 +102,7 @@
   <p>Steal a ride. Cruise the coast. Lose the cops.</p>
   <div class="play" id="play">CLICK TO PLAY</div>
   <div id="loading">Loading the city…</div>
-  <div class="keys"><b>W</b><b>A</b><b>S</b><b>D</b> move &nbsp; <b>Mouse</b> look &nbsp; <b>E</b> steal / exit car &nbsp; <b>Space</b> handbrake &nbsp; <b>Shift</b> run &nbsp; <b>C</b> camera &nbsp; <b>R</b> radio &nbsp; <b>M</b> mute</div>
+  <div class="keys"><b>W</b><b>A</b><b>S</b><b>D</b> move &nbsp; <b>Mouse</b> look &nbsp; <b>E</b> steal / exit car &nbsp; <b>Space</b> jump / handbrake &nbsp; <b>Shift</b> run &nbsp; <b>C</b> camera &nbsp; <b>R</b> radio &nbsp; <b>M</b> mute &nbsp; <b>H</b> controls</div>
   <div class="credit">Built with Claude Opus 5.5 · Character: Ready Player Me avatar, Mixamo animations · Car: Ferrari 458 Italia model by vicent091036 · Sky: Poly Haven · Music &amp; SFX synthesized in code · three.js</div>
 </div>
 <script type="module" src="./src/main.js"></script>
