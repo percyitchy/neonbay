@@ -9,6 +9,10 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import { createAudio } from "./audio.js";
+import { makeRetargeter, makeIdleClip } from "./retarget.js";
+
+const sfx = new URLSearchParams(location.search).has("rec") ? null : createAudio();
 
 // ================================================================ setup
 const REC = new URLSearchParams(location.search).has("rec");
@@ -360,7 +364,8 @@ async function loadAssets(progress) {
 	const pmrem = new THREE.PMREMGenerator(renderer);
 	const jobs = [
 		loader.loadAsync("assets/models/ferrari.glb").then((g) => (ASSETS.car = g)),
-		loader.loadAsync("assets/models/Soldier.glb").then((g) => (ASSETS.human = g)),
+		loader.loadAsync("assets/models/Soldier.glb").then((g) => (ASSETS.anims = g)),
+		loader.loadAsync("assets/models/hero.glb").then((g) => (ASSETS.hero = g)),
 		new THREE.TextureLoader().loadAsync("assets/models/ferrari_ao.png").then((t) => (ASSETS.ao = t)),
 		new RGBELoader().loadAsync("assets/env/venice_sunset_1k.hdr").then((hdr) => { hdr.mapping = THREE.EquirectangularReflectionMapping; scene.environment = pmrem.fromEquirectangular(hdr).texture; scene.environmentIntensity = 0.75; hdr.dispose(); }),
 	];
@@ -600,16 +605,28 @@ function aiDrive(car, dt, fast = false) {
 // ================================================================ people
 const peds = [];
 let player;
-const OUTFITS = [0xffffff, 0xffc2c2, 0xc2e6ff, 0xffe9a8, 0xd2ffd0, 0xf0c8ff, 0xffd6b0, 0xbfbfbf];
-function makeHuman(tint) {
-	const m = SkeletonUtils.clone(ASSETS.human.scene);
-	m.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; if (tint !== undefined && o.material.name === "VanguardBodyMat") { o.material = o.material.clone(); o.material.color = new THREE.Color(tint); } } });
+const TOPS = [0xffffff, 0x9fd3ff, 0xffb3c8, 0xfff1a8, 0xb8ffcf, 0xd6b8ff, 0xff9e7a, 0x8fe3e0, 0xff6b6b];
+const BOTTOMS = [0xffffff, 0x6b7a99, 0xd8cbb8, 0x3a3a48, 0x9ab0c8];
+let HERO_CLIPS = null;
+function prepareHumans() {
+	const rt = makeRetargeter(ASSETS.anims.scene, ASSETS.anims.animations, SkeletonUtils.clone(ASSETS.hero.scene));
+	const src = (n) => ASSETS.anims.animations.find((a) => a.name === n);
+	HERO_CLIPS = { Idle: makeIdleClip(ASSETS.hero.scene), Walk: rt(src("Walk")), Run: rt(src("Run")) };
+}
+function makeHuman(outfit) {
+	const m = SkeletonUtils.clone(ASSETS.hero.scene);
+	m.traverse((o) => {
+		if (!o.isMesh) return; o.castShadow = true; o.frustumCulled = false;
+		if (outfit) {
+			const n = o.material.name;
+			if (n === "Wolf3D_Outfit_Top") { o.material = o.material.clone(); o.material.color = new THREE.Color(outfit.top); }
+			if (n === "Wolf3D_Outfit_Bottom") { o.material = o.material.clone(); o.material.color = new THREE.Color(outfit.bottom); }
+			if (n === "Wolf3D_Headwear" && !outfit.hat) o.visible = false;
+		}
+	});
 	const holder = new THREE.Group(); holder.add(m);
-	// Soldier.glb is authored at real-world scale (about 1.8 m); skinned bounds are unreliable, so keep scale 1
-	m.rotation.y = Math.PI; // soldier faces -z
 	const mixer = new THREE.AnimationMixer(m);
-	const clip = (n) => ASSETS.human.animations.find((a) => a.name === n);
-	const idle = mixer.clipAction(clip("Idle")), walk = mixer.clipAction(clip("Walk")), run = mixer.clipAction(clip("Run"));
+	const idle = mixer.clipAction(HERO_CLIPS.Idle), walk = mixer.clipAction(HERO_CLIPS.Walk), run = mixer.clipAction(HERO_CLIPS.Run);
 	for (const a of [idle, walk, run]) { a.play(); a.setEffectiveWeight(0); }
 	idle.setEffectiveWeight(1);
 	scene.add(holder);
@@ -655,7 +672,7 @@ function updatePeds(dt) {
 // ================================================================ input
 const keys = {};
 let pressE = false, camFar = false, mouseYaw = 0, mousePitch = 0.12, mouseIdle = 99;
-addEventListener("keydown", (e) => { keys[e.code] = true; if (e.code === "KeyE" || e.code === "KeyF") pressE = true; if (e.code === "KeyC") camFar = !camFar; if (["Space", "ArrowUp", "ArrowDown"].includes(e.code)) e.preventDefault(); });
+addEventListener("keydown", (e) => { keys[e.code] = true; if (e.code === "KeyE" || e.code === "KeyF") pressE = true; if (e.code === "KeyC") camFar = !camFar; if (e.code === "KeyR" && sfx) showMsg(sfx.toggleMusic() ? "RADIO ON" : "RADIO OFF", "#33f0ff", 1); if (e.code === "KeyM" && sfx) showMsg(sfx.toggleMute() ? "SOUND ON" : "MUTED", "#fff", 1); if (["Space", "ArrowUp", "ArrowDown"].includes(e.code)) e.preventDefault(); });
 addEventListener("keyup", (e) => { keys[e.code] = false; });
 canvas.addEventListener("click", () => { if (started && document.pointerLockElement !== canvas) canvas.requestPointerLock?.(); });
 addEventListener("mousemove", (e) => { if (document.pointerLockElement !== canvas) return; mouseYaw -= e.movementX * 0.0028; mousePitch = clamp(mousePitch + e.movementY * 0.002, -0.15, 0.9); mouseIdle = 0; });
@@ -665,12 +682,43 @@ function readInput() {
 
 // ================================================================ game state
 let clock = 0, wanted = 0, wantedCool = 0, money = 0, shake = 0, msgT = 0, bustedT = 0;
+let driftCash = 0, distDriven = 0, peakWanted = 0, lostFrom3 = false, stoleCop = false, fiveStarT = 0, missionI = 0, missionDirty = true, missionT = 0;
+const MISSIONS = [
+	{ title: "Steal a car", hint: "Walk up to any car and press E", check: () => !!player.car, reward: 100 },
+	{ title: "Hit 120 km/h", hint: "Floor it on a long straight", check: () => player.car && player.car.speed * 3.6 >= 120, reward: 250 },
+	{ title: "Drift for $500", hint: "Hold Space while turning at speed", prog: () => `$${Math.min(500, Math.floor(driftCash))} / $500`, check: () => driftCash >= 500, reward: 500 },
+	{ title: "Drive 3 km around Neon Bay", hint: "Cruise the beach boulevard", prog: () => `${(distDriven / 1000).toFixed(1)} / 3 km`, check: () => distDriven >= 3000, reward: 750 },
+	{ title: "Get a 3-star wanted level", hint: "Ram traffic, cops or steal cars", check: () => wanted >= 3, reward: 1000 },
+	{ title: "Lose the cops after 3 stars", hint: "Get 60 m away and stay out of sight", check: () => lostFrom3, reward: 2000 },
+	{ title: "Steal a police car", hint: "Get out next to a cop car and press E", check: () => stoleCop, reward: 2500 },
+	{ title: "Survive 5 stars for 30 seconds", hint: "Keep moving. Don't get boxed in", prog: () => `${Math.floor(fiveStarT)} / 30 s`, check: () => fiveStarT >= 30, reward: 5000 },
+];
+function updateMissions(dt) {
+	if (wanted >= 5) fiveStarT += dt;
+	peakWanted = Math.max(peakWanted, wanted);
+	const m = MISSIONS[missionI];
+	if (m && m.check()) {
+		money += m.reward; missionI++; missionDirty = true; sfx?.sting("lost");
+		showMsg(missionI === MISSIONS.length ? "ALL MISSIONS PASSED" : "MISSION PASSED", "#ffd23f", 2.4);
+		hud.reward.textContent = `+$${m.reward.toLocaleString("en-US")}`; hud.reward.classList.add("show"); setTimeout(() => hud.reward.classList.remove("show"), 2400);
+	}
+	missionT -= dt;
+	if (missionDirty || (missionT <= 0 && MISSIONS[missionI]?.prog)) { missionT = 0.25; missionDirty = false; renderMissions(); }
+}
+function renderMissions() {
+	const done = missionI;
+	hud.mission.innerHTML = `<div class="mh">MISSIONS <span>${done}/${MISSIONS.length}</span></div>` + MISSIONS.map((m, i) => {
+		const cls = i < done ? "done" : i === done ? "cur" : "lock";
+		const extra = i === done ? `<small>${m.prog ? m.prog() + " · " : ""}${m.hint}</small>` : "";
+		return `<div class="mi ${cls}"><b>${i < done ? "✓" : i === done ? "▸" : i + 1}</b><div>${m.title} <em>$${m.reward.toLocaleString("en-US")}</em>${extra}</div></div>`;
+	}).join("");
+}
 const hud = {
 	stars: document.getElementById("stars"), money: document.getElementById("money"), speed: document.getElementById("speed"),
-	msg: document.getElementById("msg"), tip: document.getElementById("tip"), mission: document.getElementById("mission"), mini: document.getElementById("mini"),
+	msg: document.getElementById("msg"), tip: document.getElementById("tip"), mission: document.getElementById("mission"), mini: document.getElementById("mini"), reward: document.getElementById("reward"),
 };
 function showMsg(text, color = "#fff", secs = 2) { hud.msg.textContent = text; hud.msg.style.color = color; hud.msg.classList.add("show"); msgT = secs; }
-function addWanted(n) { const before = Math.floor(wanted); wanted = clamp(wanted + n, 0, 5); wantedCool = 0; if (Math.floor(wanted) > before) hud.stars.classList.add("flash"); }
+function addWanted(n) { const before = Math.floor(wanted); wanted = clamp(wanted + n, 0, 5); wantedCool = 0; if (Math.floor(wanted) > before) { hud.stars.classList.add("flash"); sfx?.sting("star"); } }
 
 function collideStatic(o, r) {
 	let hit = 0;
@@ -698,7 +746,7 @@ function collideCars() {
 		if (rv < 0) {
 			const j = -rv * 0.75; A.vx -= j * nx; A.vz -= j * nz; B.vx += j * nx; B.vz += j * nz;
 			const pc = player.car;
-			if ((A === pc || B === pc) && -rv > 6) { shake = Math.min(1, shake + -rv * 0.04); const other = A === pc ? B : A; addWanted(other.police ? 0.6 : 0.35); }
+			if ((A === pc || B === pc) && -rv > 6) { shake = Math.min(1, shake + -rv * 0.04); sfx?.crash(-rv); const other = A === pc ? B : A; addWanted(other.police ? 0.6 : 0.35); }
 		}
 	}
 }
@@ -717,8 +765,8 @@ function enterCar(car) {
 	if (car.driver && !car.police) {
 		const p = peds.find((q) => q.state === "walk");
 		if (p) { p.state = "run"; p.t = 0; p.x = car.x - Math.cos(car.h) * 2.6; p.z = car.z + Math.sin(car.h) * 2.6; p.vx = -Math.cos(car.h) * 5.5; p.vz = Math.sin(car.h) * 5.5; p.root.visible = true; p.root.rotation.set(0, 0, 0); }
-		addWanted(1); showMsg("CAR JACKED", "#ffd23f", 1.4);
-	} else if (car.police) { addWanted(2); showMsg("STOLE A COP CAR", "#ff4fa3", 1.6); }
+		addWanted(1); showMsg("CAR JACKED", "#ffd23f", 1.4); sfx?.sting("jack");
+	} else if (car.police) { addWanted(2); showMsg("STOLE A COP CAR", "#ff4fa3", 1.6); stoleCop = true; }
 	car.driver = true; car.ai = null; car.cop = null; car.max = car.police ? 42 : 40; player.car = car; player.root.visible = false;
 }
 function exitCar() {
@@ -735,13 +783,14 @@ function updatePlayer(dt) {
 		else c.input = { throttle: inp.up, brake: inp.down, steer: inp.left - inp.right, handbrake: inp.hand };
 		player.x = c.x; player.z = c.z;
 		const slip = Math.abs(c.ls);
-		if (slip > 4 && c.speed > 8) { money += slip * dt * 25; if (Math.random() < 0.7) { const bx = c.x - Math.sin(c.h) * 1.8, bz = c.z - Math.cos(c.h) * 1.8; puff(bx + Math.cos(c.h) * 0.8, bz - Math.sin(c.h) * 0.8); puff(bx - Math.cos(c.h) * 0.8, bz + Math.sin(c.h) * 0.8); } }
+		if (slip > 4 && c.speed > 8) { money += slip * dt * 25; driftCash += slip * dt * 25; if (Math.random() < 0.7) { const bx = c.x - Math.sin(c.h) * 1.8, bz = c.z - Math.cos(c.h) * 1.8; puff(bx + Math.cos(c.h) * 0.8, bz - Math.sin(c.h) * 0.8); puff(bx - Math.cos(c.h) * 0.8, bz + Math.sin(c.h) * 0.8); } }
 		if (c.speed > 25) money += dt * 12;
+		distDriven += c.speed * dt;
 		for (const p of peds) {
 			if (p.state !== "walk" && p.state !== "run") continue;
 			if (Math.hypot(p.x - c.x, p.z - c.z) < c.radius + 0.5 && c.speed > 5) {
 				p.state = "fly"; p.t = 0; p.y = 0.3; p.vx = c.vx * 0.9 + rr(-2, 2); p.vz = c.vz * 0.9 + rr(-2, 2); p.vy = 6 + c.speed * 0.2; p.spin = rr(6, 12);
-				setGait(p, "idle", 1); addWanted(1); shake = Math.min(1, shake + 0.3);
+				setGait(p, "idle", 1); addWanted(1); shake = Math.min(1, shake + 0.3); sfx?.crash(6);
 			}
 		}
 	} else {
@@ -797,13 +846,13 @@ function updatePolice(dt) {
 	if (!cops.some((c) => Math.hypot(player.x - c.x, player.z - c.z) < 4.4)) bustedT = Math.max(0, bustedT - dt);
 	if (wanted > 0) {
 		wantedCool = near ? 0 : wantedCool + dt;
-		if (wantedCool > 7) { wanted = Math.max(0, Math.floor(wanted - 0.01)); wantedCool = 0; if (wanted === 0) { showMsg("LOST THEM", "#7dff8a", 1.6); hud.stars.classList.remove("flash"); } }
+		if (wantedCool > 7) { wanted = Math.max(0, Math.floor(wanted - 0.01)); wantedCool = 0; if (wanted === 0) { if (peakWanted >= 3) lostFrom3 = true; peakWanted = 0; showMsg("LOST THEM", "#7dff8a", 1.6); hud.stars.classList.remove("flash"); sfx?.sting("lost"); } }
 	}
 	if (bustedT > 2.2 && !REC) busted();
 }
 function removeCar(c) { scene.remove(c.root); cars.splice(cars.indexOf(c), 1); }
 function busted() {
-	bustedT = 0; showMsg("BUSTED", "#ff4fa3", 2.5); money = Math.max(0, money - 500); wanted = 0; hud.stars.classList.remove("flash");
+	bustedT = 0; showMsg("BUSTED", "#ff4fa3", 2.5); sfx?.sting("busted"); money = Math.max(0, money - 500); wanted = 0; peakWanted = 0; fiveStarT = 0; hud.stars.classList.remove("flash");
 	for (const c of cars.filter((c) => c.cop)) removeCar(c);
 	if (player.car) exitCar();
 	player.x = BEACH_X - 12; player.z = CITY / 2;
@@ -841,7 +890,6 @@ function drawHud() {
 	hud.money.textContent = "$" + String(Math.floor(money)).padStart(8, "0");
 	hud.speed.firstChild.textContent = String(Math.round((player.car ? player.car.speed : 0) * 3.6));
 	hud.speed.style.opacity = player.car ? 1 : 0;
-	hud.mission.textContent = wanted >= 1 ? "Lose the cops." : player.car ? "Cruise Neon Bay. Drift for cash." : "Steal a ride. Walk up to any car and press E.";
 	const g = mctx, S = 400, sc = 1.5, yaw = camYaw + mouseYaw;
 	g.save(); g.clearRect(0, 0, S, S); g.fillStyle = "#3b3846"; g.fillRect(0, 0, S, S);
 	g.translate(S / 2, S / 2); g.rotate(Math.PI + yaw); g.scale(sc, sc); g.translate(-player.x, -player.z);
@@ -866,11 +914,16 @@ function step(dt) {
 		else if (!c.cop) c.input = { throttle: 0, brake: 1, steer: 0, handbrake: 0 };
 		c.physics(dt);
 		const hit = collideStatic(c, c.radius);
-		if (c === player.car && hit > 7) shake = Math.min(1, shake + hit * 0.05);
+		if (c === player.car && hit > 7) { shake = Math.min(1, shake + hit * 0.05); sfx?.crash(hit); }
 	}
 	collideCars();
 	for (const c of cars) c.sync(dt);
-	updatePolice(dt); updatePeds(dt); updateSmoke(dt);
+	updatePolice(dt); updatePeds(dt); updateSmoke(dt); updateMissions(dt);
+	if (sfx) {
+		let copDist = 999; for (const c of cars) if (c.cop) copDist = Math.min(copDist, Math.hypot(c.x - player.x, c.z - player.z));
+		const pc = player.car;
+		sfx.update({ inCar: !!pc, speed: pc ? pc.speed : 0, throttle: pc ? pc.input.throttle : 0, slip: pc ? Math.abs(pc.ls) : 0, copDist, beachDist: Math.max(0, player.x - (BEACH_X - 60)), time: clock });
+	}
 	if (oceanMat.userData.shader) oceanMat.userData.shader.uniforms.uTime.value = clock;
 	sun.position.set(player.x + SUN_DIR.x * 250, SUN_DIR.y * 250 + 40, player.z + SUN_DIR.z * 250); sun.target.position.set(player.x, 0, player.z);
 	updateCamera(dt);
@@ -892,9 +945,9 @@ function introCam(cam, t) {
 async function boot() {
 	const bar = document.getElementById("loading");
 	await loadAssets((k) => (bar.textContent = `Loading Neon Bay… ${Math.round(k * 100)}%`));
-	buildCity(); prepareCar(); makePlayer();
+	buildCity(); prepareCar(); prepareHumans(); makePlayer();
 	for (let k = 0; k < 24; k++) { const c = new Car(); aiStart(c, Math.floor(rr(0, N)), Math.floor(rr(0, N)), Math.floor(rr(0, 4))); }
-	for (let k = 0; k < 34; k++) { const p = makeHuman(pick(OUTFITS)); peds.push(p); spawnPed(p); p.x = 0; p.z = 0; p.mixer.update(rr(0, 2)); }
+	for (let k = 0; k < 34; k++) { const p = makeHuman({ top: pick(TOPS), bottom: pick(BOTTOMS), hat: rand() < 0.35 }); peds.push(p); spawnPed(p); p.x = 0; p.z = 0; p.mixer.update(rr(0, 2)); }
 	// start on the beach boulevard, a parked red car waiting
 	player.x = nodePos(0) + ROAD / 2 + 2.2; player.z = nodePos(4) + 14; player.h = Math.PI;
 	const starter = new Car({ color: 0xb3121f, driver: false }); starter.place(nodePos(0) + ROAD / 2 - 1.4, nodePos(4) + 9, Math.PI);
@@ -902,7 +955,7 @@ async function boot() {
 	bar.textContent = "";
 	document.getElementById("play").style.visibility = "visible";
 	if (REC) { window.NB = recApi(starter); return; }
-	const go = () => { if (started) return; started = true; document.getElementById("splash").style.display = "none"; canvas.requestPointerLock?.(); };
+	const go = () => { if (started) return; started = true; sfx?.start(); document.getElementById("splash").style.display = "none"; canvas.requestPointerLock?.(); };
 	document.getElementById("play").addEventListener("click", go);
 	addEventListener("keydown", (e) => { if (e.code === "Enter") go(); });
 	requestAnimationFrame(frame);
