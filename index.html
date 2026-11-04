@@ -10,7 +10,7 @@
 <style>
   :root { --pink:#ff4fa3; --cyan:#3ff2ff; --sun:#ffb347; }
   * { box-sizing: border-box; }
-  html, body { margin:0; height:100%; overflow:hidden; background:#120a1c; font-family: "Arial Black", Impact, system-ui, sans-serif; color:#fff; }
+  html, body { margin:0; height:100%; overflow:hidden; -webkit-user-select:none; user-select:none; -webkit-tap-highlight-color:transparent; background:#120a1c; font-family: "Arial Black", Impact, system-ui, sans-serif; color:#fff; }
   canvas#game { display:block; width:100vw; height:100vh; }
   #hud { position:fixed; inset:0; pointer-events:none; }
   #stars { position:absolute; top:22px; right:28px; display:flex; gap:6px; font-size:34px; letter-spacing:2px; }

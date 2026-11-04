@@ -12,7 +12,8 @@ function topo(bones) { const list = Object.values(bones); const depth = (b) => {
 
 export function makeRetargeter(srcScene, srcClips, tgtScene) {
 	const src = SkeletonUtils.clone(srcScene);
-	const sb = bonesOf(src, strip), tb = bonesOf(tgtScene);
+	src.rotation.y = Math.PI; // Soldier.glb faces -z, the hero faces +z: face the same way before comparing poses
+	const sb = bonesOf(src, strip), tb = bonesOf(tgtScene, strip);
 	const names = Object.keys(tb).filter((n) => sb[n]);
 	// source reference = TPose clip frame 0 (falls back to bind pose)
 	const mixer = new THREE.AnimationMixer(src);
@@ -69,7 +70,7 @@ export function makeRetargeter(srcScene, srcClips, tgtScene) {
 // A relaxed standing pose built from the model's own rest pose with the arms lowered, plus slow breathing.
 export function makeIdleClip(tgtScene) {
 	const m = SkeletonUtils.clone(tgtScene); m.updateMatrixWorld(true);
-	const tb = bonesOf(m);
+	const tb = bonesOf(m, strip);
 	const c = new THREE.Vector3(), d = new THREE.Vector3(), q = new THREE.Quaternion(), pq = new THREE.Quaternion();
 	for (const [bone, child, dir] of [["LeftArm", "LeftForeArm", new THREE.Vector3(0.16, -1, 0.04)], ["RightArm", "RightForeArm", new THREE.Vector3(-0.16, -1, 0.04)],
 		["LeftForeArm", "LeftHand", new THREE.Vector3(0.05, -1, 0.18)], ["RightForeArm", "RightHand", new THREE.Vector3(-0.05, -1, 0.18)]]) {

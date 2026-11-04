@@ -672,7 +672,7 @@ function updatePeds(dt) {
 // ================================================================ input
 const keys = {};
 let pressE = false, camFar = false, mouseYaw = 0, mousePitch = 0.12, mouseIdle = 99;
-addEventListener("keydown", (e) => { keys[e.code] = true; if (e.code === "KeyE" || e.code === "KeyF") pressE = true; if (e.code === "KeyC") camFar = !camFar; if (e.code === "KeyR" && sfx) showMsg(sfx.toggleMusic() ? "RADIO ON" : "RADIO OFF", "#33f0ff", 1); if (e.code === "KeyM" && sfx) showMsg(sfx.toggleMute() ? "SOUND ON" : "MUTED", "#fff", 1); if (["Space", "ArrowUp", "ArrowDown"].includes(e.code)) e.preventDefault(); });
+addEventListener("keydown", (e) => { keys[e.code] = true; if (e.code === "KeyE" || e.code === "KeyF") pressE = true; if (e.code === "KeyC") camFar = !camFar; if (e.code === "KeyH") document.getElementById("controls").classList.toggle("hide"); if (e.code === "Space" && player && !player.car && player.y <= 0.001) { player.vy = 6.2; } if (e.code === "KeyR" && sfx) showMsg(sfx.toggleMusic() ? "RADIO ON" : "RADIO OFF", "#33f0ff", 1); if (e.code === "KeyM" && sfx) showMsg(sfx.toggleMute() ? "SOUND ON" : "MUTED", "#fff", 1); if (["Space", "ArrowUp", "ArrowDown"].includes(e.code)) e.preventDefault(); });
 addEventListener("keyup", (e) => { keys[e.code] = false; });
 canvas.addEventListener("click", () => { if (started && document.pointerLockElement !== canvas) canvas.requestPointerLock?.(); });
 addEventListener("mousemove", (e) => { if (document.pointerLockElement !== canvas) return; mouseYaw -= e.movementX * 0.0028; mousePitch = clamp(mousePitch + e.movementY * 0.002, -0.15, 0.9); mouseIdle = 0; });
@@ -760,7 +760,7 @@ function puff(x, z) { const p = smoke[smokeI++ % smoke.length]; p.t = 0; p.s.pos
 function updateSmoke(dt) { for (const p of smoke) { if (p.t > 1.4) { p.s.visible = false; continue; } p.t += dt; const k = p.t / 1.4; p.s.scale.setScalar(1.2 + k * 4); p.s.material.opacity = 0.5 * (1 - k); p.s.position.y += dt * 0.8; } }
 
 // ================================================================ player
-function makePlayer() { const c = makeHuman(); player = { ...c, x: 0, z: 0, h: 0, car: null }; }
+function makePlayer() { const c = makeHuman(); player = { ...c, x: 0, z: 0, h: 0, y: 0, vy: 0, car: null }; }
 function enterCar(car) {
 	if (car.driver && !car.police) {
 		const p = peds.find((q) => q.state === "walk");
@@ -805,9 +805,10 @@ function updatePlayer(dt) {
 		const o = { x: player.x, z: player.z }; collideStatic(o, 0.45); player.x = o.x; player.z = o.z;
 		for (const c of cars) { const dx = player.x - c.x, dz = player.z - c.z, d = Math.hypot(dx, dz); if (d < c.radius + 0.45 && d > 0) { player.x = c.x + dx / d * (c.radius + 0.45); player.z = c.z + dz / d * (c.radius + 0.45); } }
 		const onWalk = blocks.some((b) => player.x > b.x0 && player.x < b.x1 && player.z > b.z0 && player.z < b.z1);
-		player.root.position.set(player.x, onWalk ? 0.3 : 0, player.z);
+		if (player.y > 0 || player.vy > 0) { player.vy -= 18 * dt; player.y = Math.max(0, player.y + player.vy * dt); if (player.y === 0) player.vy = 0; }
+		player.root.position.set(player.x, (onWalk ? 0.3 : 0) + player.y, player.z);
 		player.root.rotation.y += wrapAngle(player.h - player.root.rotation.y) * (1 - Math.exp(-12 * dt));
-		setGait(player, len > 0.01 ? (running ? "run" : "walk") : "idle", dt, 1);
+		setGait(player, player.y > 0 ? "run" : len > 0.01 ? (running ? "run" : "walk") : "idle", dt, player.y > 0 ? 0.4 : 1);
 		player.mixer.update(dt);
 	}
 	const near = !player.car && nearestCar(4.5);
@@ -883,6 +884,7 @@ function updateCamera(dt) {
 
 // ================================================================ HUD
 const mctx = hud.mini.getContext("2d");
+const ctlFoot = document.getElementById("ctlFoot"), ctlCar = document.getElementById("ctlCar");
 function drawHud() {
 	const n = Math.floor(wanted + 0.001);
 	[...hud.stars.children].forEach((s, i) => s.classList.toggle("on", i < n));
@@ -890,6 +892,7 @@ function drawHud() {
 	hud.money.textContent = "$" + String(Math.floor(money)).padStart(8, "0");
 	hud.speed.firstChild.textContent = String(Math.round((player.car ? player.car.speed : 0) * 3.6));
 	hud.speed.style.opacity = player.car ? 1 : 0;
+	ctlFoot.classList.toggle("on", !player.car); ctlCar.classList.toggle("on", !!player.car);
 	const g = mctx, S = 400, sc = 1.5, yaw = camYaw + mouseYaw;
 	g.save(); g.clearRect(0, 0, S, S); g.fillStyle = "#3b3846"; g.fillRect(0, 0, S, S);
 	g.translate(S / 2, S / 2); g.rotate(Math.PI + yaw); g.scale(sc, sc); g.translate(-player.x, -player.z);
